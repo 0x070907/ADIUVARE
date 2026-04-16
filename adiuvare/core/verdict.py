@@ -3,6 +3,9 @@ def compute_verdict(
     snap=None,
     identity_risk: float = 0.0,
     payload_risk: float = 0.0,
+    ai_verdict: str = "",
+    ai_conf: float = 0.0,
+    ai_mode: str = "off",
 ) -> str:
     if identity_risk >= 0.60:
         score = min(1.0, score + 0.10)
@@ -12,6 +15,12 @@ def compute_verdict(
     flag = snap.flag_threshold if snap else 0.25
 
     if payload_risk >= 0.85 and score < throttle:
+        return "throttle"
+
+    if ai_mode == "critical" and ai_verdict == "malicious" and ai_conf >= 0.60:
+        return "block"
+
+    if ai_mode in {"assist", "critical"} and ai_verdict == "suspicious" and score >= flag:
         return "throttle"
 
     if score >= block:

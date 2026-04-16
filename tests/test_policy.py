@@ -25,6 +25,16 @@ def test_guard_protect_decorator_sets_inline_cfg():
     assert view._adiuvare_cfg["trackB"] is False
 
 
+def test_guard_protect_keeps_ai_mode_visible():
+    guard = Guard()
+
+    @guard.protect(ai_mode="critical")
+    async def view():
+        return {"ok": True}
+
+    assert view._adiuvare_cfg["ai_mode"] == "critical"
+
+
 def test_guard_exempt_marks_route():
     guard = Guard()
 

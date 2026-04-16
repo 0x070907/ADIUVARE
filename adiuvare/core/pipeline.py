@@ -50,11 +50,19 @@ class Pipeline:
         ai_res = None
         if ctx.snapshot and ctx.snapshot.ai_mode != "off":
             ai_res = await self._ai_sig.review(ctx, score)
+        ai_verdict = ""
+        ai_conf = 0.0
+        if ai_res is not None:
+            ai_verdict = ai_res.detail.get("verdict", "")
+            ai_conf = ai_res.detail.get("confidence", 0.0)
         verdict = compute_verdict(
             score,
             ctx.snapshot,
             identity_risk=identity_risk,
             payload_risk=payload_risk,
+            ai_verdict=ai_verdict,
+            ai_conf=ai_conf,
+            ai_mode=ctx.snapshot.ai_mode if ctx.snapshot else "off",
         )
         detail = {"signal_reasons": {name: res.reason for name, res in sig_res.items()}}
         if ai_res is not None:

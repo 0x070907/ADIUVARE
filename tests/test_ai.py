@@ -83,3 +83,39 @@ def test_pipeline_carries_ai_detail_in_event():
     assert gate.passed is True
     assert event is not None
     assert event.detail["ai"]["verdict"] == "suspicious"
+
+
+async def _bad_call(ctx, prior_score):
+    return {
+        "verdict": "malicious",
+        "confidence": 0.9,
+        "reason": f"bad enough near {ctx.endpoint} at {prior_score:.2f}",
+    }
+
+
+def test_pipeline_critical_mode_can_short_circuit_to_block():
+    snap = ConfigSnapshot(
+        payload_weight=0.4,
+        behavior_weight=0.35,
+        identity_weight=0.25,
+        flag_threshold=0.25,
+        throttle_threshold=0.55,
+        block_threshold=0.8,
+        ai_mode="critical",
+    )
+    ctx = RequestContext(
+        identity="u1",
+        payload="hello there",
+        url="/review",
+        method="POST",
+        headers={"User-Agent": "Mozilla/5.0"},
+        ip="127.0.0.1",
+        endpoint="/review",
+        snapshot=snap,
+    )
+
+    pipe = Pipeline(IdentityStore(), ai_sig=AISignal(caller=_bad_call))
+    gate, event = asyncio.run(pipe.process(ctx))
+    assert gate.passed is True
+    assert event is not None
+    assert event.verdict == "block"

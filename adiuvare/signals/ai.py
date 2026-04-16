@@ -54,6 +54,7 @@ class AISignal(SoftSignal):
                 "confidence": conf,
                 "note": reason,
                 "model": self._model,
+                "score_hint": score,
             },
         )
 
