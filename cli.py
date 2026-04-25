@@ -1,0 +1,200 @@
+import argparse
+import json
+import sys
+from collections import Counter
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from adiuvare.config.editor import merge_sections
+from adiuvare.config.loader import load_config
+from adiuvare.state.audit_log import AuditLog
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="adv", description="Adiuvare local operator shell")
+    sub = parser.add_subparsers(dest="cmd")
+
+    p_init = sub.add_parser("init", help="write a starter adiuvare.yaml")
+    p_init.add_argument("--path", default="adiuvare.yaml")
+    p_init.add_argument("--no-tui", action="store_true")
+
+    sub.add_parser("status", help="show local status")
+
+    p_cfg = sub.add_parser("config", help="patch a config key")
+    p_cfg.add_argument("action", choices=["set"])
+    p_cfg.add_argument("key")
+    p_cfg.add_argument("value")
+
+    p_logs = sub.add_parser("logs", help="print recent audit rows")
+    p_logs.add_argument("--tail", type=int, default=20)
+
+    p_report = sub.add_parser("report", help="print a local markdown summary")
+    p_report.add_argument("--save", action="store_true")
+
+    args = parser.parse_args()
+
+    if args.cmd is None:
+        _open_tui()
+    elif args.cmd == "init":
+        _run_init(Path(args.path), no_tui=args.no_tui)
+    elif args.cmd == "status":
+        _run_status()
+    elif args.cmd == "config":
+        _run_config_set(args.key, args.value)
+    elif args.cmd == "logs":
+        _run_logs(args.tail)
+    elif args.cmd == "report":
+        _run_report(save=args.save)
+
+
+def _open_tui() -> None:
+    cfg = _find_cfg()
+    if cfg is None:
+        _run_init(Path("adiuvare.yaml"), no_tui=False)
+        return
+    from adiuvare.tui.app import AdiuvareApp
+
+    AdiuvareApp(config_path=str(cfg)).run()
+
+
+def _run_init(path: Path, no_tui: bool) -> None:
+    dest = path if path.suffix else path / "adiuvare.yaml"
+    if no_tui:
+        _plain_terminal_wizard(dest)
+        return
+    try:
+        from adiuvare.tui.wizard import run_wizard
+    except Exception:
+        _plain_terminal_wizard(dest)
+        return
+    run_wizard(dest)
+
+
+def _plain_terminal_wizard(dest: Path) -> None:
+    framework = _ask("Framework?", ["fastapi", "flask", "django", "other"], "fastapi")
+    instances = _ask("Instances?", ["single", "multi"], "single")
+    strictness = _ask("Strictness?", ["public", "internal", "critical"], "internal")
+    mode = _ask("Mode?", ["observe", "enforce"], "observe")
+    ai_mode = "assist" if _ask("Enable AI?", ["yes", "no"], "no") == "yes" else "off"
+    save_path = Path(_ask("Save path", [str(dest)], str(dest)))
+
+    merge_sections(
+        save_path,
+        {
+            "runtime": {"observe_only": mode == "observe"},
+            "ai": {"mode": ai_mode, "enabled": ai_mode != "off"},
+            "meta": {
+                "framework": framework,
+                "instances": instances,
+                "strictness": strictness,
+            },
+        },
+    )
+
+
+def _run_status() -> None:
+    cfg = _find_cfg()
+    if cfg is None:
+        print("missing adiuvare.yaml")
+        return
+    loaded = load_config(cfg)
+    print(f"config: {cfg}")
+    print(f"observe_only: {loaded.runtime.observe_only}")
+    print(f"ai_mode: {loaded.ai.mode}")
+    print(f"audit_db: {loaded.runtime.audit_db_path}")
+
+
+def _run_config_set(key: str, value: str) -> None:
+    cfg = _find_cfg()
+    if cfg is None:
+        print("missing adiuvare.yaml", file=sys.stderr)
+        raise SystemExit(1)
+
+    raw = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
+    node = raw
+    parts = key.split(".")
+    for part in parts[:-1]:
+        child = node.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            node[part] = child
+        node = child
+    node[parts[-1]] = _coerce(value)
+    cfg.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+
+def _run_logs(tail: int) -> None:
+    cfg = _must_cfg()
+    loaded = load_config(cfg)
+    audit = AuditLog(loaded.runtime.audit_db_path)
+    for row in audit.recent(limit=tail):
+        print(f"{row.get('verdict', '?'):8} {row.get('identity', '?')} {row.get('endpoint', '?')}")
+
+
+def _run_report(save: bool = False) -> None:
+    cfg = _must_cfg()
+    loaded = load_config(cfg)
+    audit = AuditLog(loaded.runtime.audit_db_path)
+    rows = audit.recent(limit=200)
+    counts = Counter(str(row.get("verdict", "allow")) for row in rows)
+    top_ids = Counter(str(row.get("identity", "?")) for row in rows).most_common(5)
+    lines = [
+        "# Adiuvare report",
+        "",
+        f"- rows: {len(rows)}",
+        f"- allow: {counts.get('allow', 0)}",
+        f"- flag: {counts.get('flag', 0)}",
+        f"- throttle: {counts.get('throttle', 0)}",
+        f"- block: {counts.get('block', 0)}",
+        "",
+        "## busiest identities",
+    ]
+    for identity, count in top_ids:
+        lines.append(f"- {identity}: {count}")
+    report = "\n".join(lines)
+    print(report)
+    if save:
+        Path("adiuvare_report.md").write_text(report, encoding="utf-8")
+
+
+def _find_cfg() -> Path | None:
+    here = Path.cwd()
+    for base in [here, *here.parents]:
+        cand = base / "adiuvare.yaml"
+        if cand.exists():
+            return cand
+    return None
+
+
+def _must_cfg() -> Path:
+    cfg = _find_cfg()
+    if cfg is None:
+        print("missing adiuvare.yaml", file=sys.stderr)
+        raise SystemExit(1)
+    return cfg
+
+
+def _coerce(value: str) -> Any:
+    low = value.lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    try:
+        if "." in value:
+            return float(value)
+        return int(value)
+    except ValueError:
+        return value
+
+
+def _ask(prompt: str, options: list[str], default: str) -> str:
+    answer = input(f"{prompt} [{' / '.join(options)}] ({default}): ").strip().lower()
+    return answer if answer in options else default
+
+
+if __name__ == "__main__":
+    main()
+
