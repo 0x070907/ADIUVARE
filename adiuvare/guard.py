@@ -58,6 +58,7 @@ class Guard:
         self._last_sink: dict[str, Any] | None = None
         self._bg_task: asyncio.Task | None = None
         self._bg_started = False
+        self._bg_lock: asyncio.Lock | None = None
         configure_trackA(wl=self._wl, hard_sigs=self._hard_sigs)
 
     @property
@@ -176,6 +177,16 @@ class Guard:
             start_checkpoint_loop(self._state_DBpath, self._id_store)
         )
         self._bg_started = True
+
+    async def ensure_started(self) -> None:
+        if self._bg_started:
+            return
+        if self._bg_lock is None:
+            self._bg_lock = asyncio.Lock()
+        async with self._bg_lock:
+            if self._bg_started:
+                return
+            await self.startbgtasks()
 
     async def shutdown(self) -> None:
         if self._bg_task is not None:

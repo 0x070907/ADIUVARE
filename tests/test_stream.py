@@ -145,6 +145,19 @@ def test_event_stream_client_runs_remote_command(tmp_path):
     asyncio.run(run())
 
 
+def test_event_stream_client_fails_cleanly_before_start(tmp_path):
+    async def run():
+        client = EventStreamClient(tmp_path / "missing.sock")
+        try:
+            await client.command("ping", {"ok": True})
+        except RuntimeError as exc:
+            assert str(exc) == "stream_not_started"
+        else:
+            raise AssertionError("expected stream_not_started")
+
+    asyncio.run(run())
+
+
 def test_redis_stream_publishes_and_replays(monkeypatch):
     seen = {}
 

@@ -279,4 +279,6 @@ class EventStreamClient:
                     int(meta["port"]),
                 )
 
+        if not path.exists():
+            raise RuntimeError("stream_not_started")
         return await asyncio.open_unix_connection(self.path)

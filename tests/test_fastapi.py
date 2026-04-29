@@ -1,5 +1,6 @@
 import asyncio
 import time
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -74,6 +75,34 @@ def test_fastapi_runs_trackB_in_background():
     assert seen == []
     time.sleep(0.3)
     assert seen == ["allow"]
+
+
+def test_fastapi_lazy_starts_runtime_when_hooks_are_skipped(tmp_path):
+    cfg = tmp_path / "adiuvare.yaml"
+    cfg.write_text(
+        "\n".join(
+            [
+                "runtime:",
+                f"  audit_db_path: '{(tmp_path / 'audit.db').as_posix()}'",
+                f"  state_db_path: '{(tmp_path / 'state.db').as_posix()}'",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    app = FastAPI()
+    guard = Guard(config_path=str(cfg), soft_signals=[SlowSignal()])
+    guard.use(app, framework="fastapi")
+
+    @app.get("/ping")
+    async def ping():
+        return {"ok": True}
+
+    client = TestClient(app)
+    res = client.get("/ping", headers={"User-Agent": "Mozilla/5.0", "x-user-id": "u2"})
+    assert res.status_code == 200
+    assert guard._bg_started is True
+    assert Path(guard.event_stream.path).exists()
 
 
 def test_fastapi_background_trackB_writes_audit_and_stream(monkeypatch):

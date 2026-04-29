@@ -19,6 +19,7 @@ class AdiuvareMiddleware(BaseHTTPMiddleware):
         self._route_source = route_source
 
     async def dispatch(self, request: Request, call_next):
+        await self._guard.ensure_started()
         body = await request.body()
         body_text = body.decode() if body else None
         raw_ip = request.headers.get("x-forwarded-for", "")
