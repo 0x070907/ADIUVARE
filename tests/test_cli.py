@@ -5,7 +5,7 @@ from pathlib import Path
 
 import yaml
 
-from cli import _find_cfg, _find_socket, _open_tui, _plain_terminal_wizard, _run_config_set, _run_init, _run_logs, _run_status
+from cli import _find_cfg, _find_socket, _open_tui, _plain_terminal_wizard, _run_config_set, _run_init, _run_ip_ban, _run_ip_unban, _run_logs, _run_status
 from adiuvare.core.models import AdiuvareEvent
 from adiuvare.state.audit_log import AuditLog
 
@@ -144,12 +144,22 @@ def test_run_status_uses_runtime_snapshot_when_socket_is_live(tmp_path, monkeypa
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "cli._runtime_link",
-        lambda: ("demo.sock", {"backend": "sqlite", "observe_only": False, "ai_mode": "assist", "recent_events": 7}),
+        lambda: (
+            "demo.sock",
+            {
+                "backend": "sqlite",
+                "observe_only": False,
+                "ai_mode": "assist",
+                "banned_ip_count": 2,
+                "recent_events": 7,
+            },
+        ),
     )
     _run_status()
     out = capsys.readouterr().out
     assert "runtime: connected" in out
     assert "socket: demo.sock" in out
+    assert "banned_ips: 2" in out
     assert "recent_events: 7" in out
 
 
@@ -173,3 +183,47 @@ def test_open_tui_passes_live_socket_to_app(tmp_path, monkeypatch):
     assert seen["socket_path"] == "demo.sock"
     assert seen["config_path"] == str(cfg)
     assert seen["ran"] is True
+
+
+def test_run_ip_ban_sends_runtime_command(monkeypatch, capsys):
+    monkeypatch.setattr("cli._find_socket", lambda: "demo.sock")
+
+    async def fake_command(self, name, args=None):
+        assert name == "ban_ip"
+        assert args == {"ip": "203.0.113.4"}
+        return {"ok": True, "ip": "203.0.113.4", "banned_ip_count": 1}
+
+    monkeypatch.setattr("cli.EventStreamClient.command", fake_command)
+    _run_ip_ban("203.0.113.4")
+    out = capsys.readouterr().out
+    assert "banned ip: 203.0.113.4" in out
+    assert "banned_ips: 1" in out
+
+
+def test_run_ip_unban_sends_runtime_command(monkeypatch, capsys):
+    monkeypatch.setattr("cli._find_socket", lambda: "demo.sock")
+
+    async def fake_command(self, name, args=None):
+        assert name == "unban_ip"
+        assert args == {"ip": "203.0.113.4"}
+        return {"ok": True, "ip": "203.0.113.4", "banned_ip_count": 0}
+
+    monkeypatch.setattr("cli.EventStreamClient.command", fake_command)
+    _run_ip_unban("203.0.113.4")
+    out = capsys.readouterr().out
+    assert "unbanned ip: 203.0.113.4" in out
+    assert "banned_ips: 0" in out
+
+
+def test_run_ip_ban_exits_when_runtime_is_offline(monkeypatch, capsys):
+    monkeypatch.setattr("cli._find_socket", lambda: None)
+
+    try:
+        _run_ip_ban("203.0.113.4")
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("expected SystemExit")
+
+    err = capsys.readouterr().err
+    assert "runtime: offline" in err

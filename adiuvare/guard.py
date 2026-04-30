@@ -248,6 +248,7 @@ class Guard:
             "backend": self._cfg.runtime.backend,
             "hard_sigs": [sig.name for sig in self._hard_sigs],
             "whitelist_size": len(self._wl._ids),
+            "banned_ip_count": len(self._wl._banned_ips),
             "recent_events": len(recent),
             "state_db": str(self._state_DBpath),
             "audit_db": self._cfg.runtime.audit_db_path,
@@ -270,6 +271,7 @@ class Guard:
             identity = str(args["identity"])
             self._id_store.clear_block(identity)
             self._wl.add(identity)
+            self._audit.write_patch("unblock_whitelist", {"identity": identity})
             self.checkpoint()
             return {"ok": True, "identity": identity}
 
@@ -278,6 +280,28 @@ class Guard:
             identity = str(args.get("identity", ""))
             self._audit.write_patch("unblock_note", {"identity": identity, "note": note})
             return {"ok": True, "identity": identity}
+
+        if name == "ban_ip":
+            ip = str(args["ip"])
+            self._wl.ban_ip(ip)
+            self._audit.write_patch("ban_ip", {"ip": ip})
+            return {
+                "ok": True,
+                "ip": ip,
+                "banned": True,
+                "banned_ip_count": len(self._wl._banned_ips),
+            }
+
+        if name == "unban_ip":
+            ip = str(args["ip"])
+            self._wl.unban_ip(ip)
+            self._audit.write_patch("unban_ip", {"ip": ip})
+            return {
+                "ok": True,
+                "ip": ip,
+                "banned": False,
+                "banned_ip_count": len(self._wl._banned_ips),
+            }
 
         if name == "patch_config":
             changes = args.get("changes") or {}

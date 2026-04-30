@@ -117,6 +117,26 @@ def test_guard_stream_command_path_updates_runtime_state(tmp_path):
     assert allow["ok"] is True
     assert guard.whitelist.allows("u1") is True
 
+    banned = asyncio.run(
+        guard.event_stream.command(
+            "ban_ip",
+            {"ip": "203.0.113.4"},
+        )
+    )
+    assert banned["ok"] is True
+    assert banned["banned"] is True
+    assert guard.whitelist.ip_blocked("203.0.113.4") is True
+
+    unbanned = asyncio.run(
+        guard.event_stream.command(
+            "unban_ip",
+            {"ip": "203.0.113.4"},
+        )
+    )
+    assert unbanned["ok"] is True
+    assert unbanned["banned"] is False
+    assert guard.whitelist.ip_blocked("203.0.113.4") is False
+
     patched = asyncio.run(
         guard.event_stream.command(
             "patch_config",

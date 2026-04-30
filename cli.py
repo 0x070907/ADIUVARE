@@ -36,6 +36,12 @@ def main() -> None:
     p_report = sub.add_parser("report", help="print a local markdown summary")
     p_report.add_argument("--save", action="store_true")
 
+    p_ban_ip = sub.add_parser("ban-ip", help="ban an ip in the running runtime")
+    p_ban_ip.add_argument("ip")
+
+    p_unban_ip = sub.add_parser("unban-ip", help="remove an ip ban from the running runtime")
+    p_unban_ip.add_argument("ip")
+
     args = parser.parse_args()
 
     if args.cmd is None:
@@ -50,6 +56,10 @@ def main() -> None:
         _run_logs(args.tail)
     elif args.cmd == "report":
         _run_report(save=args.save)
+    elif args.cmd == "ban-ip":
+        _run_ip_ban(args.ip)
+    elif args.cmd == "unban-ip":
+        _run_ip_unban(args.ip)
 
 
 def _open_tui() -> None:
@@ -131,6 +141,7 @@ def _run_status() -> None:
         print(f"instances: {loaded.meta.instances}")
         print(f"observe_only: {snap.get('observe_only', loaded.runtime.observe_only)}")
         print(f"ai_mode: {snap.get('ai_mode', loaded.ai.mode)}")
+        print(f"banned_ips: {snap.get('banned_ip_count', 0)}")
         print(f"recent_events: {snap.get('recent_events', 0)}")
         return
 
@@ -195,6 +206,18 @@ def _run_report(save: bool = False) -> None:
         Path("adiuvare_report.md").write_text(report, encoding="utf-8")
 
 
+def _run_ip_ban(ip: str) -> None:
+    res = _runtime_command("ban_ip", {"ip": ip})
+    print(f"banned ip: {res['ip']}")
+    print(f"banned_ips: {res.get('banned_ip_count', '?')}")
+
+
+def _run_ip_unban(ip: str) -> None:
+    res = _runtime_command("unban_ip", {"ip": ip})
+    print(f"unbanned ip: {res['ip']}")
+    print(f"banned_ips: {res.get('banned_ip_count', '?')}")
+
+
 def _find_cfg() -> Path | None:
     return find_config_file()
 
@@ -256,6 +279,23 @@ def _runtime_snap(socket_path: str) -> dict[str, Any] | None:
         return asyncio.run(call())
     except Exception:
         return None
+
+
+def _runtime_command(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    socket_path = _find_socket()
+    if not socket_path:
+        print("runtime: offline", file=sys.stderr)
+        raise SystemExit(1)
+
+    async def call() -> dict[str, Any]:
+        client = EventStreamClient(socket_path)
+        return await client.command(name, args)
+
+    try:
+        return asyncio.run(call())
+    except Exception as exc:
+        print(f"runtime command failed: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

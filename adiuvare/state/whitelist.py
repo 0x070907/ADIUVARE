@@ -12,5 +12,8 @@ class WhitelistStore:
     def ban_ip(self, ip: str) -> None:
         self._banned_ips.add(ip)
 
+    def unban_ip(self, ip: str) -> None:
+        self._banned_ips.discard(ip)
+
     def ip_blocked(self, ip: str) -> bool:
         return ip in self._banned_ips
