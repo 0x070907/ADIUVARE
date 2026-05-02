@@ -71,6 +71,7 @@ class Guard:
             self._stream.set_command_handler(self.handlestreamcmd)
         self.policies = dict(BUILTIN_POLICIES)
         self._route_cfg: dict[str, Any] = {}
+        self._route_overview: dict[str, dict[str, Any]] = {}
         self._last_identity: str | None = None
         self._last_sink: dict[str, Any] | None = None
         self._bg_task: asyncio.Task | None = None
@@ -259,6 +260,11 @@ class Guard:
 
     def runtimesnapshot(self) -> dict[str, Any]:
         recent = self._stream.recent() if hasattr(self._stream, "recent") else []
+        monitored_identities = sorted(
+            identity
+            for identity, win in self._id_store.items()
+            if win.monitored_remaining > 0
+        )
         return {
             "ai_mode": self._cfg_snap.ai_mode,
             "ai_enabled": self._cfg.ai.enabled,
@@ -269,15 +275,25 @@ class Guard:
             "hard_sigs": [sig.name for sig in self._hard_sigs],
             "whitelist_size": len(self._wl._ids),
             "banned_ip_count": len(self._wl._banned_ips),
-            "monitored_identity_count": sum(
-                1 for _identity, win in self._id_store.items() if win.monitored_remaining > 0
-            ),
+            "monitored_identity_count": len(monitored_identities),
+            "whitelisted_identities": sorted(self._wl.identities()),
+            "banned_ips": sorted(self._wl.banned_ips()),
+            "monitored_identities": monitored_identities,
             "monitored_window": self._cfg.runtime.monitored_window,
             "monitored_multiplier": self._cfg.runtime.monitored_multiplier,
             "recent_events": len(recent),
             "state_db": str(self._state_DBpath),
             "audit_db": self._cfg.runtime.audit_db_path,
+            "flag_threshold": self._cfg.thresholds.flag,
+            "throttle_threshold": self._cfg.thresholds.throttle,
+            "block_threshold": self._cfg.thresholds.block,
+            "payload_weight": self._cfg.weights.payload,
+            "behavior_weight": self._cfg.weights.behavior,
+            "identity_weight": self._cfg.weights.identity,
+            "context_weight": ContextSignal.weight,
+            "ip_rep_weight": IPRepSignal.weight,
             "route_overrides": len(self._route_cfg),
+            "route_overview": self.routeoverview(),
             "bg_started": self._bg_started,
         }
 
@@ -402,6 +418,10 @@ class Guard:
                 self._cfg.ai.enabled = self._cfg.ai.mode != "off"
             if "observe_only" in changes:
                 self._cfg.runtime.observe_only = bool(changes["observe_only"])
+            if "flag_threshold" in changes:
+                self._cfg.thresholds.flag = float(changes["flag_threshold"])
+            if "throttle_threshold" in changes:
+                self._cfg.thresholds.throttle = float(changes["throttle_threshold"])
             if "block_threshold" in changes:
                 self._cfg.thresholds.block = float(changes["block_threshold"])
             self._cfg_snap = build_snapshot(self._cfg)
@@ -412,6 +432,11 @@ class Guard:
             window = str(args.get("window", "7d"))
             limit = int(args.get("limit", 500))
             return await self.analysis_report(window=window, limit=limit)
+
+        if name == "get_route_overview":
+            return {
+                "routes": self.routeoverview(),
+            }
 
         if name == "ask_ai_analyst":
             question = str(args.get("question", "")).strip()
@@ -464,6 +489,9 @@ class Guard:
 
     def configure_routes(self, routes: dict[str, Any]):
         self._route_cfg.update(routes)
+        for path, saved in routes.items():
+            if isinstance(saved, dict):
+                self._remember_route(path, self._expand_routecfg(saved), saved=saved)
         return self
 
     def use(self, app: Any, framework: str = "fastapi") -> None:
@@ -609,11 +637,13 @@ class Guard:
 
         if endpoint is not None:
             if getattr(endpoint, "_adiuvare_exempt", False):
+                self._remember_route(path, {"exempt": True}, saved=saved)
                 return {"exempt": True}
             live = getattr(endpoint, "_adiuvare_cfg", None)
             if isinstance(live, dict):
                 cfg.update(live)
 
+        self._remember_route(path, cfg, saved=saved)
         return cfg
 
     def routesnap(self, route_cfg: dict[str, Any] | None):
@@ -644,3 +674,44 @@ class Guard:
             return max(1, int(label))
         except ValueError:
             return 7
+
+    def routeoverview(self) -> list[dict[str, Any]]:
+        for path, saved in self._route_cfg.items():
+            if isinstance(saved, dict) and path not in self._route_overview:
+                self._remember_route(path, self._expand_routecfg(saved), saved=saved)
+        ordered = sorted(
+            self._route_overview.values(),
+            key=lambda item: (str(item.get("route", "")) != "*", str(item.get("route", ""))),
+        )
+        return [dict(item) for item in ordered]
+
+    def _remember_route(
+        self,
+        path: str,
+        cfg: dict[str, Any] | None,
+        *,
+        saved: dict[str, Any] | None = None,
+    ) -> None:
+        route = path or "*"
+        cfg = dict(cfg or {})
+        saved = dict(saved or {})
+        exempt = bool(cfg.get("exempt") or saved.get("exempt"))
+        status = "exempt" if exempt else "active"
+        sensitivity = str(
+            cfg.get("sensitivity")
+            or saved.get("sensitivity")
+            or self._cfg.meta.strictness
+        )
+        ai_mode = str(
+            cfg.get("ai_mode")
+            or saved.get("ai_mode")
+            or self._cfg.ai.mode
+        )
+        policy = str(saved.get("policy") or cfg.get("policy") or "-")
+        self._route_overview[route] = {
+            "route": route,
+            "status": status,
+            "sensitivity": sensitivity,
+            "policy": policy,
+            "ai_mode": ai_mode,
+        }

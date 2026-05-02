@@ -42,6 +42,7 @@ class AdiuvareEvent:
     score: float
     verdict: str
     breakdown: dict[str, float]
+    ip: str = ""
     detail: dict[str, Any] = field(default_factory=dict)
     logged_verdict: str | None = None
 

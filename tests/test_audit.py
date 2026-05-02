@@ -78,7 +78,7 @@ def test_audit_log_query_helpers_work(tmp_path):
         score=0.42,
         verdict="flag",
         breakdown={"payload": 0.28},
-        detail={"ai": {"verdict": "suspicious"}},
+        detail={"ip": "203.0.113.4", "ai": {"verdict": "suspicious"}},
     )
     second = AdiuvareEvent(
         identity="u2",
@@ -94,6 +94,26 @@ def test_audit_log_query_helpers_work(tmp_path):
     mine = log.by_identity("u1")
     assert recent[0]["identity"] == "u2"
     assert mine[0]["detail"]["ai"]["verdict"] == "suspicious"
+    assert mine[0]["ip"] == "203.0.113.4"
+
+
+def test_audit_log_backfills_ip_from_event_field(tmp_path):
+    db_path = tmp_path / "audit.db"
+    log = AuditLog(db_path)
+    event = AdiuvareEvent(
+        identity="u9",
+        endpoint="/probe",
+        score=0.33,
+        verdict="allow",
+        breakdown={"payload": 0.1},
+        ip="198.51.100.7",
+    )
+
+    log.write(event)
+
+    recent = log.recent(1)
+    assert recent[0]["ip"] == "198.51.100.7"
+    assert recent[0]["detail"]["ip"] == "198.51.100.7"
 
 
 def test_checkpoint_state_helper_runs(tmp_path):
@@ -203,12 +223,26 @@ def test_guard_stream_command_path_updates_runtime_state(tmp_path):
     patched = asyncio.run(
         guard.event_stream.command(
             "patch_config",
-            {"changes": {"ai_mode": "assist", "observe_only": True}},
+            {
+                "changes": {
+                    "ai_mode": "assist",
+                    "observe_only": True,
+                    "flag_threshold": 0.33,
+                    "throttle_threshold": 0.58,
+                    "block_threshold": 0.81,
+                }
+            },
         )
     )
     assert patched["ai_mode"] == "assist"
     assert patched["observe_only"] is True
     assert patched["ai_enabled"] is True
+    assert patched["flag_threshold"] == 0.33
+    assert patched["throttle_threshold"] == 0.58
+    assert patched["block_threshold"] == 0.81
+    assert guard.config.thresholds.flag == 0.33
+    assert guard.config.thresholds.throttle == 0.58
+    assert guard.config.thresholds.block == 0.81
 
 
 def test_guard_startup_loads_persisted_operator_state(tmp_path):

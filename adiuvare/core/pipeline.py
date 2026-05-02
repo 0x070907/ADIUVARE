@@ -64,7 +64,10 @@ class Pipeline:
             ai_conf=ai_conf,
             ai_mode=ctx.snapshot.ai_mode if ctx.snapshot else "off",
         )
-        detail = {"signal_reasons": {name: res.reason for name, res in sig_res.items()}}
+        detail = {
+            "ip": ctx.ip,
+            "signal_reasons": {name: res.reason for name, res in sig_res.items()},
+        }
         if ai_res is not None:
             detail["ai"] = ai_res.detail
         if decision.logged != decision.verdict:
@@ -76,6 +79,7 @@ class Pipeline:
             score=score,
             verdict=decision.verdict,
             breakdown=breakdown,
+            ip=ctx.ip,
             detail=detail,
             logged_verdict=decision.logged,
         )
