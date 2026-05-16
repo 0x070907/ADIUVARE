@@ -1,5 +1,6 @@
 import pytest
-import sqlalchemy as sa
+
+sa = pytest.importorskip("sqlalchemy", reason="sqlalchemy not installed, skipping sink tests")
 
 from adiuvare import Guard
 from adiuvare.integrations.django_sink import wrap_query
