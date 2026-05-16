@@ -3,7 +3,6 @@ import json
 
 from werkzeug.wrappers import Request, Response
 
-from .sqlalchemy import _sink_mode
 from . import build_http_ctx, ctx_payload
 
 
@@ -14,6 +13,9 @@ class AdiuvareMiddleware:
         self._flask = flask_app
 
     def __call__(self, environ, start_response):
+
+        from .sqlalchemy import _sink_mode
+        
         req = Request(environ)
         raw_ip = req.headers.get("x-forwarded-for", "")
         ip = raw_ip.split(",", 1)[0].strip() or req.remote_addr or "127.0.0.1"
