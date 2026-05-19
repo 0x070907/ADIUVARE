@@ -14,8 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-flask = [
-  "flask",
+sink = [
   "sqlalchemy",
 ]
 dev = [
