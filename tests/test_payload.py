@@ -438,6 +438,37 @@ def test_payload_keeps_pipe_filter_param_clean():
     res = asyncio.run(PayloadSignal().extract(ctx))
     assert res.score == 0.0
 
+
+    
+def test_payload_marks_top_level_nosql_operator_text():
+    ctx = RequestContext(
+        identity="u1",
+        payload='{"$ne":null}',
+        url="/login",
+        method="POST",
+        headers={},
+        ip="127.0.0.1",
+        endpoint="/login",
+    )
+
+    res = asyncio.run(PayloadSignal().extract(ctx))
+    assert res.score >= 0.6
+
+
+def test_payload_keeps_nosql_operator_docs_clean():
+    ctx = RequestContext(
+        identity="u1",
+        payload="Explain what $ne means in MongoDB docs",
+        url="/docs",
+        method="GET",
+        headers={},
+        ip="127.0.0.1",
+        endpoint="/docs",
+    )
+
+    res = asyncio.run(PayloadSignal().extract(ctx))
+    assert res.score == 0.0
+
 def test_payload_marks_ldap_injection_probe():
     ctx = RequestContext(
         identity="u1",
@@ -573,6 +604,9 @@ def test_payload_keeps_bash_docs_text_clean():
     assert res.score == 0.0
 
 
+
+
+
 def test_payload_keeps_curl_docs_clean():
     ctx = RequestContext(
         identity="u1",
@@ -587,6 +621,21 @@ def test_payload_keeps_curl_docs_clean():
     res = asyncio.run(PayloadSignal().extract(ctx))
     assert res.score == 0.0
 
+
+
+def test_payload_keeps_nosql_ne_docs_clean():
+    ctx = RequestContext(
+        identity="u1",
+        payload="How does $ne work in MongoDB?",
+        url="/docs",
+        method="GET",
+        headers={},
+        ip="127.0.0.1",
+        endpoint="/docs",
+    )
+
+    res = asyncio.run(PayloadSignal().extract(ctx))
+    assert res.score == 0.0
 
 def test_payload_keeps_wget_docs_clean():
     ctx = RequestContext(
@@ -603,6 +652,21 @@ def test_payload_keeps_wget_docs_clean():
     assert res.score == 0.0
 
 
+
+def test_payload_marks_encoded_top_level_nosql_operator_text():
+    ctx = RequestContext(
+        identity="u1",
+        payload="%7B%22%24ne%22%3Anull%7D",
+        url="/login",
+        method="POST",
+        headers={},
+        ip="127.0.0.1",
+        endpoint="/login",
+    )
+
+    res = asyncio.run(PayloadSignal().extract(ctx))
+    assert res.score >= 0.6
+
 def test_payload_keeps_markdown_codeblock_clean():
     ctx = RequestContext(
         identity="u1",
@@ -616,3 +680,4 @@ def test_payload_keeps_markdown_codeblock_clean():
 
     res = asyncio.run(PayloadSignal().extract(ctx))
     assert res.score == 0.0
+
